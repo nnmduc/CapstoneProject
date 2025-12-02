@@ -3,6 +3,7 @@ import pandas as pd
 import streamlit as st
 from PIL import Image
 import tensorflow as tf
+from tensorflow.keras.applications import efficientnet_v2
 from huggingface_hub import hf_hub_download
 from pathlib import Path
 
@@ -51,19 +52,20 @@ def load_model() -> tf.keras.Model:
         st.stop()
 
 def preprocess_image(img: Image.Image) -> np.ndarray:
-    """Preprocess the uploaded image for model prediction.
+    """Preprocess the uploaded image for model prediction using EfficientNetV2 preprocessing.
     
     Args:
         img: PIL Image object
         
     Returns:
-        Preprocessed image array with shape (1, 224, 224, 3) and normalized values [0, 1]
+        Preprocessed image array with shape (1, 224, 224, 3) using EfficientNetV2 preprocessing
     """
     img = img.convert("RGB")  # Convert image to RGB format
     img = img.resize(IMG_SIZE)  # Resize image to the target dimensions
     img_array = np.array(img).astype("float32")  # Convert PIL Image to NumPy array
-    img_array = img_array / 255.0  # Normalize pixel values to [0, 1] range
     img_array = np.expand_dims(img_array, axis=0)  # Add batch dimension (1, 224, 224, 3)
+    # Apply EfficientNetV2-specific preprocessing (same as during training)
+    img_array = efficientnet_v2.preprocess_input(img_array)
     return img_array
 
 # Load the model
