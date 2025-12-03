@@ -4,3 +4,4 @@ pandas
 pillow
 tensorflow
 huggingface_hub
+openai

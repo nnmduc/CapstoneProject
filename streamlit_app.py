@@ -6,6 +6,9 @@ import tensorflow as tf
 from tensorflow.keras.applications import efficientnet_v2
 from huggingface_hub import hf_hub_download
 from pathlib import Path
+from openai import OpenAI
+
+client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
 # Set Streamlit page configuration (must be first Streamlit command)
 st.set_page_config(
@@ -43,7 +46,7 @@ def load_model() -> tf.keras.Model:
                 local_dir_use_symlinks=False
             )
             st.success("Model downloaded successfully!")
-        
+
         # Load the pre-trained Keras model
         model = tf.keras.models.load_model(MODEL_PATH)
         return model
@@ -53,20 +56,42 @@ def load_model() -> tf.keras.Model:
 
 def preprocess_image(img: Image.Image) -> np.ndarray:
     """Preprocess the uploaded image for model prediction using EfficientNetV2 preprocessing.
-    
+
     Args:
         img: PIL Image object
         
     Returns:
-        Preprocessed image array with shape (1, 224, 224, 3) using EfficientNetV2 preprocessing
+          Preprocessed image array with shape (1, 224, 224, 3) using EfficientNetV2 preprocessing    
     """
-    img = img.convert("RGB")  # Convert image to RGB format
-    img = img.resize(IMG_SIZE)  # Resize image to the target dimensions
-    img_array = np.array(img).astype("float32")  # Convert PIL Image to NumPy array
-    img_array = np.expand_dims(img_array, axis=0)  # Add batch dimension (1, 224, 224, 3)
+    img = img.convert("RGB") # Convert image to RGB format
+    img = img.resize(IMG_SIZE) # Resize image to the target dimensions
+    img_array = np.array(img).astype("float32") # Convert PIL Image to NumPy array
+    img_array = np.expand_dims(img_array, axis=0) # Add a batch dimension (e.g., (1, 224, 224, 3))
     # Apply EfficientNetV2-specific preprocessing (same as during training)
     img_array = efficientnet_v2.preprocess_input(img_array)
     return img_array
+
+def get_dr_description(label_text: str) -> str:
+    prompt = f"""
+    You are an assistant providing general medical information.
+    lease briefly explain the stage of diabetic retinopathy:: "{label_text}".
+
+    Requirements:
+    - Briefly describe the stage of the disease.
+    - List treatment and follow-up directions REFERENCE (non-personalized).
+    - Always remind the patient to see an ophthalmologist for accurate advice.
+    - Limit about 150–200 words.
+    """
+
+    completion = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[
+            {"role": "system", "content": "You are a medical assistant who only provides reference information, always reminding users to see a doctor."},
+            {"role": "user", "content": prompt}
+        ],
+        temperature=0.3,
+    )
+    return completion.choices[0].message.content
 
 # Load the model
 model = load_model()
@@ -95,7 +120,7 @@ if uploaded_file is not None:
     try:
         image = Image.open(uploaded_file)
         st.image(image, caption="Uploaded Image", use_column_width=True)
-        
+
         # Create a button for prediction
         if st.button("🔍 Run Prediction", type="primary"):
             with st.spinner("Analyzing image..."):
@@ -111,10 +136,15 @@ if uploaded_file is not None:
                     pred_class = int(np.argmax(pred_probs))
                     pred_conf = float(np.max(pred_probs))
 
+                    # Get chatgpt to loading description
+                    label_text = ID2LABEL.get(pred_class, str(pred_class))
+                    with st.spinner("Generating disease description with AI..."):
+                        description = get_dr_description(label_text)
+
                     # Display the predicted result
                     st.success("Prediction completed!")
                     st.subheader("📊 Predicted Result")
-                    
+
                     # Highlight prediction with metrics
                     col1, col2 = st.columns(2)
                     with col1:
@@ -122,9 +152,17 @@ if uploaded_file is not None:
                     with col2:
                         st.metric("Confidence", f"{pred_conf:.2%}")
 
+                    # Show the description of class
+                    st.markdown("### 🩺 Disease description (AI-generated, for reference only)")
+                    st.write(description)
+                    st.info(
+                        "This information is for educational purposes only and does not replace "
+                        "a consultation with an eye specialist."
+                    )
+
                     # Display probabilities for all classes in a table
                     st.subheader("📈 Probability for Each Class")
-                    
+
                     # Create DataFrame for better table formatting
                     prob_df = pd.DataFrame([
                         {
@@ -134,13 +172,13 @@ if uploaded_file is not None:
                         }
                         for i in range(len(pred_probs))
                     ])
-                    
+
                     st.dataframe(prob_df, use_container_width=True, hide_index=True)
-                    
+
                 except Exception as e:
                     st.error(f"Error during prediction: {str(e)}")
                     st.exception(e)
-    
+
     except Exception as e:
         st.error(f"Error loading image: {str(e)}")
         st.exception(e)
